@@ -1,4 +1,5 @@
-
+## Well commented dual objective experiment
+## Second objective using simplified viscoelastic equation
 # Basics
 import numpy as np
 import matplotlib.pyplot as plt
@@ -20,13 +21,16 @@ from sklearn.metrics import mean_squared_error
 #%matplotlib inline 
 
 df=pd.read_msgpack('MREdata_080618.msg')
+#column includes: filename, freq, fslice, RS(\mu), Ui,Ur
+
 
 # Prepare Data
 Ur = np.stack(df.Ur.values,axis=0)
 Ui = np.stack(df.Ui.values,axis=0)
-x_data = np.sqrt(Ui**2+Ur**2)
+Freq=df.Freq.values #values are np.array 
+x_data = np.sqrt(Ui**2+Ur**2) #numpy default is elementwise operation
 
-y_data = np.stack(df.RS.values,axis=2).transpose(2,0,1)
+y_data = np.stack(df.RS.values,axis=2).transpose(2,0,1) #Rs is mu
 y_data = y_data/10000.
 
 print('X size:', x_data.shape)
@@ -41,33 +45,33 @@ print('Training examples:   ', len(x_train))
 print('Validation examples: ', len(x_valid))
 print('Testing examples:    ', len(x_test))
 
-
+#define laplace using tensorflow
 def laplace(x):
     # Make Kernel
     a = np.asarray([[0., 1., 0.],
                     [1.,-4., 1.],
-                    [0., 1., 0.]])    
+                    [0., 1., 0.]])    #a is kernal of doing second derivative
 
-    a = a.reshape(list(a.shape) + [1,1])
+    a = a.reshape(list(a.shape) + [1,1]) #expand a to 4-D
     kernel = K.constant(a,dtype=1)
     
     # Do Convolution
-    x = K.expand_dims(K.expand_dims(x, 0), -1)
-    y = K.depthwise_conv2d(x,kernel, padding='same')
+    x = K.expand_dims(K.expand_dims(x, 0), -1) #insert 1 dimension at the beginnig and end of x
+    y = K.depthwise_conv2d(x,kernel, padding='same') # do conv2d: second derivative
     
     return y[0,:,:,0]
 
-def laplacian(x):
-    u = K.tf.norm(x,axis=3)
-    return K.map_fn(laplace,u)
+def laplacian(x): #doing laplacian on the norm of u
+    u = K.tf.norm(x,axis=3) 
+    return K.map_fn(laplace,u) 
 
 
 def laplacian3D(x):
-    u1 = K.map_fn(laplace,x[:,:,:,0])
-    u2 = K.map_fn(laplace,x[:,:,:,1])
-    u3 = K.map_fn(laplace,x[:,:,:,2])
+    u1 = K.map_fn(laplace,x[:,:,:,0]) #x direction
+    u2 = K.map_fn(laplace,x[:,:,:,1]) #y direction
+    u3 = K.map_fn(laplace,x[:,:,:,2]) #z direction 
 #    u  = K.tf.add_n([u1,u2,u3])
-    u  = K.tf.stack([u1,u2,u3],axis=3)
+    u  = K.tf.stack([u1,u2,u3],axis=3)#laplacian of u (u is a vector)
     return u
 
 
@@ -88,7 +92,7 @@ L3 = 32
 L4 = 32
 
 # Build Neural Model
-
+# residual neural network with autoencoding
 # Encoding
 x  = Input(shape=xshp,name='Input')
 h  = Conv2D(L1,kernel_size=(5,5),strides=(2,2),activation='relu',padding='same',name='E1')(x)
@@ -118,7 +122,7 @@ l = Lambda(laplacian3D,name='Laplacian')(x)
 m = Lambda(muStack,name='StackedMu')(y)
 
 #z = dot([y,l],axes=[1,2],name='Mre')
-z = multiply([m,l],name='Mre')
+z = multiply([m,l],name='Mre') #\mu*laplacian(u)
 # z = dot([y,l],axes=-1,name='Mre')
 
 # Build Model
@@ -136,9 +140,17 @@ aux.compile(loss='mse',  optimizer='adam')
 
 #x_aux = np.linalg.norm(x_train,axis=-1)
 
+#right side of viscoelastic equation:
+#-\omega*\rho*u
+#first replicate freq (\omega) to N*64*64*3 to multiply elemently
+omega=2*3.14*Freq.reshape([Freq.size,1,1,1])
+omega=np.tile(omega,[1,64,64,3]) #np.tile is equivalent to Matlab reshape
+rho=1000 #predefined \rho
+obj2=-rho*omega*U
 
 # Train Model
-log = aux.fit(x_train,[y_train,x_train],
+# this is the dual-objective part. Obj1 is y_train 
+log = aux.fit(x_train,[y_train,obj2],
              epochs=nepoch,
              batch_size=nbatch)
 
