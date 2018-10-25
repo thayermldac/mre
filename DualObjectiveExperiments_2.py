@@ -33,13 +33,26 @@ x_data = np.sqrt(Ui**2+Ur**2) #numpy default is elementwise operation
 y_data = np.stack(df.RS.values,axis=2).transpose(2,0,1) #Rs is mu
 y_data = y_data/10000.
 
+#right side of viscoelastic equation:
+#-\omega*\rho*u
+#first replicate freq (\omega) to N*64*64*3 to multiply elemently
+omega2=(2*3.14*Freq)**2 #omega squared
+omega2=omega2.reshape([Freq.size,1,1,1]);
+omega2=np.tile(omega2,[1,64,64,3]) #np.tile is equivalent to Matlab reshape
+rho=1000 #predefined \rho
+aux_data=rho*omega2  #aux_data has frequency feature (expanded to correct dimension) shape: N*64*64*3
+
+
+
+
+
 print('X size:', x_data.shape)
 print('Y size:', y_data.shape)
 
 
 # Split to Train & Valid
-x_train, x_test, y_train, y_test = train_test_split(x_data,y_data,test_size=0.3)
-x_train, x_valid, y_train, y_valid = train_test_split(x_train,y_train,test_size=0.3)
+x_train, x_test, aux_train,aux_test, y_train, y_test = train_test_split(x_data,aux_data,y_data,test_size=0.3)
+x_train, x_valid,aux_train,aux_valid, y_train, y_valid = train_test_split(x_train,aux_train,y_train,test_size=0.3)
 
 print('Training examples:   ', len(x_train))
 print('Validation examples: ', len(x_valid))
@@ -95,6 +108,7 @@ L4 = 32
 # residual neural network with autoencoding
 # Encoding
 x  = Input(shape=xshp,name='Input')
+aux = Input(shape=xshp,name='aux_input')
 h  = Conv2D(L1,kernel_size=(5,5),strides=(2,2),activation='relu',padding='same',name='E1')(x)
 h  = Conv2D(L2,kernel_size=(3,3),strides=(2,2),activation='relu',padding='same',name='E2')(h)
 h  = Conv2D(L3,kernel_size=(3,3),strides=(2,2),activation='relu',padding='same',name='E3')(h)
@@ -122,7 +136,10 @@ l = Lambda(laplacian3D,name='Laplacian')(x)
 m = Lambda(muStack,name='StackedMu')(y)
 
 #z = dot([y,l],axes=[1,2],name='Mre')
-z = multiply([m,l],name='Mre') #\mu*laplacian(u)
+equal = multiply([m,l],name='equal') # \mu*laplacian(u) %left of viscoelastic equation
+equar = multiply([aux,x],name='equlr') # rho*f*u
+equa = add([equal,equar],name='Mre') # viscoelastic equation
+
 # z = dot([y,l],axes=-1,name='Mre')
 
 # Build Model
@@ -130,32 +147,26 @@ z = multiply([m,l],name='Mre') #\mu*laplacian(u)
 #model.summary()
 
 # Build Aux Model
-aux   = Model(inputs=x,outputs=[y,z])
+aux   = Model(inputs=[x,aux],outputs=[y,equa])
 aux.summary()
 
 # Compiling Model
 #model.compile(loss='mse',optimizer='adam')
-aux.compile(loss='mse',  optimizer='adam')
+aux.compile(loss='mse',loss_weights=[1.,0.2], optimizer='adam')
 
 
 #x_aux = np.linalg.norm(x_train,axis=-1)
 
-#right side of viscoelastic equation:
-#-\omega*\rho*u
-#first replicate freq (\omega) to N*64*64*3 to multiply elemently
-omega=2*3.14*Freq.reshape([Freq.size,1,1,1])
-omega=np.tile(omega,[1,64,64,3]) #np.tile is equivalent to Matlab reshape
-rho=1000 #predefined \rho
-obj2=-rho*omega*U
+
 
 # Train Model
-# this is the dual-objective part. Obj1 is y_train 
-log = aux.fit(x_train,[y_train,obj2],
+# this is the dual-objective part. Obj1 is y_train ,obj2 is viscoelastic equation (should be 0)
+log = aux.fit([x_train,aux_train],[y_train,np.zeros_like(aux_train)],
              epochs=nepoch,
              batch_size=nbatch)
 
 
-y_pred = aux.predict(x_test)
+y_pred = aux.predict([x_test,aux_test])
 y_pred1=[y]
 # Visualize Examples
 nimg=3
