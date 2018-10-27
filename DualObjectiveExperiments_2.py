@@ -10,7 +10,7 @@ import random
 import keras
 import keras.backend as K
 from keras.models import Model, load_model
-from keras.layers import Input, Dense, Conv2D, Lambda, UpSampling2D
+from keras.layers import Input, Dense, Conv2D, Lambda, UpSampling2D, BatchNormalization
 from keras.layers import Dot, dot, add, multiply
 
 # Others
@@ -20,7 +20,7 @@ from sklearn.metrics import mean_squared_error
 
 #%matplotlib inline 
 
-df=pd.read_msgpack('MREdata_080618.msg')
+df=pd.read_msgpack('MREdata_102418.msg')
 #column includes: filename, freq, fslice, RS(\mu), Ui,Ur
 
 
@@ -109,7 +109,8 @@ L4 = 32
 # Encoding
 x  = Input(shape=xshp,name='Input')
 aux = Input(shape=xshp,name='aux_input')
-h  = Conv2D(L1,kernel_size=(5,5),strides=(2,2),activation='relu',padding='same',name='E1')(x)
+x1=BatchNormalization()(x)
+h  = Conv2D(L1,kernel_size=(5,5),strides=(2,2),activation='relu',padding='same',name='E1')(x1)
 h  = Conv2D(L2,kernel_size=(3,3),strides=(2,2),activation='relu',padding='same',name='E2')(h)
 h  = Conv2D(L3,kernel_size=(3,3),strides=(2,2),activation='relu',padding='same',name='E3')(h)
 e  = Conv2D(L4,kernel_size=(2,2),strides=(1,1),activation='relu',padding='same',name='E4')(h)
@@ -122,7 +123,8 @@ h  = UpSampling2D((2,2))(h)
 h  = Conv2D(L2,kernel_size=(3,3),activation='relu',padding='same',name='D3')(h)
 h  = UpSampling2D((2,2))(h)
 h  = Conv2D(1,kernel_size=(5,5),activation='relu',padding='same',name='D4')(h)
-y  = Lambda(lambda xx: K.squeeze(xx,3),name='Recon')(h)
+h1=BatchNormalization()(h)
+y  = Lambda(lambda xx: K.squeeze(xx,3),name='Recon')(h1)
 
 # Laplacian
 print(x.shape)
@@ -137,7 +139,7 @@ m = Lambda(muStack,name='StackedMu')(y)
 
 #z = dot([y,l],axes=[1,2],name='Mre')
 equal = multiply([m,l],name='equal') # \mu*laplacian(u) %left of viscoelastic equation
-equar = multiply([aux,x],name='equlr') # rho*f*u
+equar = multiply([aux,x],name='equlr') # rho*w^2*u
 equa = add([equal,equar],name='Mre') # viscoelastic equation
 
 # z = dot([y,l],axes=-1,name='Mre')
@@ -152,7 +154,7 @@ aux.summary()
 
 # Compiling Model
 #model.compile(loss='mse',optimizer='adam')
-aux.compile(loss='mse',loss_weights=[1.,0.2], optimizer='adam')
+aux.compile(loss='mse',loss_weights=[1.,1e-16], optimizer='adam')
 
 
 #x_aux = np.linalg.norm(x_train,axis=-1)
@@ -169,7 +171,7 @@ log = aux.fit([x_train,aux_train],[y_train,np.zeros_like(aux_train)],
 y_pred = aux.predict([x_test,aux_test])
 y_pred1=[y]
 # Visualize Examples
-nimg=3
+nimg=10
 for i in range(nimg):
     ax=plt.subplot(3,nimg,i+1)
     plt.imshow(y_test[i+10])
