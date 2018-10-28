@@ -22,7 +22,7 @@ from sklearn.metrics import mean_squared_error
 
 #%matplotlib inline 
 
-df=pd.read_msgpack('MREdata_102418.msg')
+df=pd.read_msgpack('../MREdata_102418.msg')
 #column includes: filename, freq, fslice, RS(\mu), Ui,Ur
 
 
@@ -111,18 +111,23 @@ L4 = 32
 # Encoding
 x  = Input(shape=xshp,name='Input')
 aux = Input(shape=xshp,name='aux_input')
-x1=BatchNormalization()(x)
-h  = Conv2D(L1,kernel_size=(5,5),strides=(2,2),activation='relu',padding='same',name='E1')(x1)
+h  = Conv2D(L1,kernel_size=(5,5),strides=(2,2),activation='relu',padding='same',name='E1')(x)
+h=BatchNormalization()(h)
 h  = Conv2D(L2,kernel_size=(3,3),strides=(2,2),activation='relu',padding='same',name='E2')(h)
+h=BatchNormalization()(h)
 h  = Conv2D(L3,kernel_size=(3,3),strides=(2,2),activation='relu',padding='same',name='E3')(h)
+h=BatchNormalization()(h)
 e  = Conv2D(L4,kernel_size=(2,2),strides=(1,1),activation='relu',padding='same',name='E4')(h)
-
+e=BatchNormalization()(e)
 # Decoding
 h  = Conv2D(L4,kernel_size=(2,2),activation='relu',padding='same',name='D1')(e)
+h=BatchNormalization()(h)
 h  = UpSampling2D((2,2))(h)
 h  = Conv2D(L3,kernel_size=(3,3),activation='relu',padding='same',name='D2')(h)
+h=BatchNormalization()(h)
 h  = UpSampling2D((2,2))(h)
 h  = Conv2D(L2,kernel_size=(3,3),activation='relu',padding='same',name='D3')(h)
+h=BatchNormalization()(h)
 h  = UpSampling2D((2,2))(h)
 h  = Conv2D(1,kernel_size=(5,5),activation='relu',padding='same',name='D4')(h)
 h1=BatchNormalization()(h)

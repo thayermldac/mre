@@ -11,6 +11,7 @@ import random
 # Keras
 import keras
 import keras.backend as K
+from keras import layers
 from keras.models import Model, load_model
 from keras.layers import Input, Dense, Conv2D, Lambda, UpSampling2D, BatchNormalization
 from keras.layers import Dot, dot, add, multiply
@@ -22,7 +23,7 @@ from sklearn.metrics import mean_squared_error
 
 #%matplotlib inline 
 
-df=pd.read_msgpack('MREdata_102418.msg')
+df=pd.read_msgpack('../MREdata_102418.msg')
 #column includes: filename, freq, fslice, RS(\mu), Ui,Ur
 
 
@@ -98,7 +99,7 @@ U=np.sqrt(Ur*Ur+Ui*Ui)
 # Parameters
 xshp   = x_train.shape[1:]
 nbatch = 64
-nepoch = 3000
+nepoch = 3
 
 # Architecture
 L1 = 64
@@ -106,25 +107,70 @@ L2 = 50
 L3 = 32
 L4 = 32
 
+def residual_block(y, nb_channels, _strides=(1, 1), _project_shortcut=False):
+    shortcut = y
+
+    # down-sampling is performed with a stride of 2
+    y = layers.Conv2D(nb_channels, kernel_size=(3, 3), strides=_strides, padding='same')(y)
+    y = layers.BatchNormalization()(y)
+    y = layers.LeakyReLU()(y)
+
+    y = layers.Conv2D(nb_channels, kernel_size=(3, 3), strides=(1, 1), padding='same')(y)
+    y = layers.BatchNormalization()(y)
+
+    # identity shortcuts used directly when the input and output are of the same dimensions
+    if _project_shortcut or _strides != (1, 1):
+        # when the dimensions increase projection shortcut is used to match dimensions (done by 1×1 convolutions)
+        # when the shortcuts go across feature maps of two sizes, they are performed with a stride of 2
+        shortcut = layers.Conv2D(nb_channels, kernel_size=(1, 1), strides=_strides, padding='same')(shortcut)
+        shortcut = layers.BatchNormalization()(shortcut)
+
+    y = layers.add([shortcut, y])
+    y = layers.LeakyReLU()(y)
+
+    return y
+
+## recreate the CNN with residual layers
+#Autoencoder
+
+
 # Build Neural Model
 # residual neural network with autoencoding
 # Encoding
 x  = Input(shape=xshp,name='Input')
 aux = Input(shape=xshp,name='aux_input')
 x1=BatchNormalization()(x)
-h  = Conv2D(L1,kernel_size=(5,5),strides=(2,2),activation='relu',padding='same',name='E1')(x1)
-h  = Conv2D(L2,kernel_size=(3,3),strides=(2,2),activation='relu',padding='same',name='E2')(h)
-h  = Conv2D(L3,kernel_size=(3,3),strides=(2,2),activation='relu',padding='same',name='E3')(h)
-e  = Conv2D(L4,kernel_size=(2,2),strides=(1,1),activation='relu',padding='same',name='E4')(h)
-
+#h  = Conv2D(L1,kernel_size=(5,5),strides=(2,2),activation='relu',padding='same',name='E1')(x1)
+h=residual_block(x1,L1,(2,2))
+#h  = Conv2D(L2,kernel_size=(3,3),strides=(2,2),activation='relu',padding='same',name='E2')(h)
+h=residual_block(h,L2,(2,2))
+#h  = Conv2D(L3,kernel_size=(3,3),strides=(2,2),activation='relu',padding='same',name='E3')(h)
+h=residual_block(h,L3,(2,2))
+#e  = Conv2D(L4,kernel_size=(2,2),strides=(1,1),activation='relu',padding='same',name='E4')(h)
+e=residual_block(h,L4,(1,1))
 # Decoding
-h  = Conv2D(L4,kernel_size=(2,2),activation='relu',padding='same',name='D1')(e)
+#h  = Conv2D(L4,kernel_size=(2,2),activation='relu',padding='same',name='D1')(e)
+h=residual_block(e,L4)
 h  = UpSampling2D((2,2))(h)
-h  = Conv2D(L3,kernel_size=(3,3),activation='relu',padding='same',name='D2')(h)
+#h  = Conv2D(L3,kernel_size=(3,3),activation='relu',padding='same',name='D2')(h)
+h=residual_block(h,L3)
 h  = UpSampling2D((2,2))(h)
-h  = Conv2D(L2,kernel_size=(3,3),activation='relu',padding='same',name='D3')(h)
+#h  = Conv2D(L2,kernel_size=(3,3),activation='relu',padding='same',name='D3')(h)
+h=residual_block(h,L2)
 h  = UpSampling2D((2,2))(h)
-h  = Conv2D(1,kernel_size=(5,5),activation='relu',padding='same',name='D4')(h)
+#h  = Conv2D(1,kernel_size=(5,5),activation='relu',padding='same',name='D4')(h)
+h=residual_block(h,L1)
+#h=residual_block(x1,64,(2,2))
+#h=residual_block(x,50, (2,2))
+#h=residual_block(x,32,(2,2))
+#h=UpSampling2D((2,2))(x)
+#h=residual_block(x,32)
+#h=UpSampling2D((2,2))(x)
+#h=residual_block(x,32)
+#h=UpSampling2D((2,2))(x)
+#h=residual_block(x,1,(1,1),True)
+
+
 h1=BatchNormalization()(h)
 y  = Lambda(lambda xx: K.squeeze(xx,3),name='Recon')(h1)
 
